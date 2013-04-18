@@ -8,7 +8,6 @@ use Mojo::JSON 'j';
 use Digest::MD5 qw(md5_hex);
 
 use constant {
-    #working parameters
     CHUNK_SIZE => 64000,
 };
 
@@ -69,7 +68,6 @@ sub slice_file {
 
     my ( $data, $n );
     while ( ( $n = read $file, $data, CHUNK_SIZE ) > 0 ) {
-        #INFO "$n bytes have been readed from $file";
         push @{ $chunks->{ $path_to_file_in_target } }, $data;
     }
 
@@ -81,6 +79,10 @@ sub ws_is_next_file_exist {
     if ( my $file = shift @files ) {
         my $req = { request => 'IS_FILE_VERSION_EXISTED', client => $args->{ '-n' }, file => $file };
         $tx->send( j $req );
+        return 1;
+    }
+    else {
+        return 0;
     }
 }
 
@@ -105,13 +107,15 @@ sub ws_create_file_version {
 BEGIN {
 	Log::Log4perl->easy_init(
 		{ 
-			level    => 'DEBUG',
-            file     => "STDOUT",
-            layout   => '%m%n' 
+			level  => 'DEBUG',
+            file   => "STDOUT",
+            layout => '%m%n' 
         }, 
     );
 
 	$args = { @ARGV };
+
+    $args->{ '-p' } = $1 if $args->{ '-p' } =~ /^([^\/]+)\/$/;
 
 	crawl $args->{ '-p' }; #crawl all files
 
@@ -124,7 +128,7 @@ BEGIN {
 		
         $tx->on( finish => sub {
 			my ( $tx, $code, $reason ) = @_;
-			INFO "Servers session closed because $reason";
+			INFO "Session with Briariues-server has been closed.";
 		});
 
 		$tx->on( message => sub {
@@ -146,7 +150,8 @@ BEGIN {
             }
             elsif ( $msg->{ response } eq 'FILE_VERSION_IS_EXISTED' ) {
                 INFO "File version $msg->{ file_version } is existed";
-                ws_is_next_file_exist( $tx );
+                $chunks->{ $msg->{ file } } = undef;
+                $tx->finish unless ws_is_next_file_exist( $tx );
             }
             elsif ( $msg->{ response } eq 'CHUNK_IS_NOT_EXISTED' ) {
                 INFO "Chunk $msg->{ chunk_hash } is not existed.";
@@ -181,7 +186,10 @@ BEGIN {
             }
             elsif ( $msg->{ response } eq 'FILE_VERSION_WAS_CREATED' ) {
                 INFO "File version $msg->{ file_version } was created.";
-                ws_is_next_file_exist( $tx );
+                unless ( ws_is_next_file_exist( $tx ) ) {
+                    INFO 'No more files to back up';
+                    $tx->finish;
+                }
             }
             else {
                 ERROR 'Unknown server response ' . Dumper $msg;

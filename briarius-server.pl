@@ -12,7 +12,10 @@ plugin 'PODRenderer';
 use constant {
 	FILES_REGISTRY 	  => 'files_registry/',
 	CHUNCKS_REGISTRY  => 'chunks_registry/',
-	INCOMPLETE_ENDING => '.incomplete'
+	CHUNCKS_USAGE     => 'chunks_usage/',
+	INCOMPLETE_ENDING => '.incomplete',
+
+	BACKUP_FREQUENCY_THRESHOLD => 60,
 };
 
 my $started_at = DateTime->now;
@@ -53,11 +56,25 @@ sub create_chunk {
 	return 1;
 }
 
-sub create_file_version {
+sub is_available_for_backup {
+	my $path_to_file_version = FILES_REGISTRY . shift;
+	$path_to_file_version =~ /^(.+\/)[^\/]+$/;
+	return 1 unless -e $1;
+	my $last_backup_date = 0;
+	opendir( my $file_dir, $1 );
+    while ( readdir $file_dir ) {
+        next if $_ =~ /^\.\.?$/;
+        $last_backup_date = $1 if $_ =~ /^([0-9]+)$/ and $1 > $last_backup_date;
+    }
+    closedir $file_dir;
+    return $last_backup_date + BACKUP_FREQUENCY_THRESHOLD <= time ? 1 : 0;
+}
+
+sub complete_file_version {
 	my ( $file_version ) = @_;
+	return ( 0, "File version $file_version is already existed" ) if is_file_version_existed $file_version;
 	my $path_to_version = FILES_REGISTRY . $file_version;
 	my $path_to_incomplete_version = $path_to_version . INCOMPLETE_ENDING;
-	return ( 0, "File version $file_version is already existed" ) if -e $path_to_version;
 	return ( 0, "Has no incomplete $file_version" ) unless -e $path_to_incomplete_version;
 	return rename $path_to_incomplete_version, $path_to_version;
 }
@@ -74,10 +91,10 @@ sub on_message {
 	}
 	elsif ( $msg->{ request } eq 'IS_FILE_VERSION_EXISTED' ) {
 		$self->app->log->info( "Client $msg->{ client } ask: is file version for file $msg->{ file } existed?" );
-
 		my $user = 'Ivan';
 		my $key = create_file_version_key( $user, $msg->{ file }, time );
-		if ( is_file_version_existed $key ) {
+		#say "a: " . is_available_for_backup( $key );
+		unless ( is_available_for_backup( $key ) ) {			
 			$self->send( j { response => 'FILE_VERSION_IS_EXISTED', file => $msg->{ file }, file_version => $key } );
 		}
 		else {
@@ -130,7 +147,7 @@ sub on_message {
 	elsif ( $msg->{ request } eq 'CREATE_FILE_VERSION' ) {
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		my ( $status, $message ) = create_file_version $msg->{ file_version };		
+		my ( $status, $message ) = complete_file_version $msg->{ file_version };		
 		if ( $status ) {
 			$response->{ response } = 'FILE_VERSION_WAS_CREATED';
 		}
