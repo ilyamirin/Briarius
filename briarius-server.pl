@@ -20,6 +20,14 @@ use constant {
 
 my $started_at = DateTime->now;
 
+sub get_last_numeric_filename_into_dir {
+	my $dirname = shift;
+	opendir( my $dh, $dirname );
+	my @numeric_filenames = sort { $a <=> $b } grep { /^[0-9]+$/ and -f "$dirname/$_" } readdir($dh);
+    closedir $dh;
+    return scalar @numeric_filenames ? pop @numeric_filenames : 0; 
+}
+
 sub create_file_version_key {
 	my ( $user_name, $target_file_path, $time ) = @_;
 	return join '/' => $user_name, $target_file_path, $time;
@@ -31,13 +39,10 @@ sub is_file_version_existed {
 
 sub add_chunk_to_version {
 	my ( $chunk_hash, $file_version ) = @_;
-	$file_version =~ /^(.+)\/[^\/]+$/;
-	make_path FILES_REGISTRY . $1;
-	say FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
-    open( my $file, '>>', FILES_REGISTRY . $file_version . INCOMPLETE_ENDING ) or return 0;
-    print $file "$chunk_hash\n";
-    close $file;
-    return 1;
+	my $path_to_file = FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
+	make_path $path_to_file;
+	my $last_chunk_number = get_last_numeric_filename_into_dir( $path_to_file );
+	link CHUNCKS_REGISTRY . $chunk_hash, $path_to_file . '/' . ++$last_chunk_number;
 }
 
 sub is_chunk_existed {
@@ -49,7 +54,6 @@ sub create_chunk {
 	if ( -e CHUNCKS_REGISTRY . $chunk_hash ) {
 		return 0;
 	}
-    $chunk_hash =~ s/\//--/g;
     open( my $file, '>', CHUNCKS_REGISTRY . $chunk_hash ) or return 0;
     print $file $chunk_content;
     close $file;
@@ -60,13 +64,7 @@ sub is_available_for_backup {
 	my $path_to_file_version = FILES_REGISTRY . shift;
 	$path_to_file_version =~ /^(.+\/)[^\/]+$/;
 	return 1 unless -e $1;
-	my $last_backup_date = 0;
-	opendir( my $file_dir, $1 );
-    while ( readdir $file_dir ) {
-        next if $_ =~ /^\.\.?$/;
-        $last_backup_date = $1 if $_ =~ /^([0-9]+)$/ and $1 > $last_backup_date;
-    }
-    closedir $file_dir;
+	my $last_backup_date = get_last_numeric_filename_into_dir( $1 );
     return $last_backup_date + BACKUP_FREQUENCY_THRESHOLD <= time ? 1 : 0;
 }
 
@@ -93,7 +91,6 @@ sub on_message {
 		$self->app->log->info( "Client $msg->{ client } ask: is file version for file $msg->{ file } existed?" );
 		my $user = 'Ivan';
 		my $key = create_file_version_key( $user, $msg->{ file }, time );
-		#say "a: " . is_available_for_backup( $key );
 		unless ( is_available_for_backup( $key ) ) {			
 			$self->send( j { response => 'FILE_VERSION_IS_EXISTED', file => $msg->{ file }, file_version => $key } );
 		}
@@ -160,8 +157,8 @@ sub on_message {
 }
 
 sub on_finish {
-	my ( $self, $code, $reason ) = @_;
-	$self->app->log->debug("WebSocket closed with status $code.");
+	my ( $self ) = shift;
+	$self->app->log->debug("WebSocket closed with " . Dumper @_);
 }
 
 get '/' => sub {

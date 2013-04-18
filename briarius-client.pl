@@ -113,9 +113,11 @@ BEGIN {
         }, 
     );
 
+    my $started_at = localtime( time );
+
 	$args = { @ARGV };
 
-    $args->{ '-p' } = $1 if $args->{ '-p' } =~ /^([^\/]+)\/$/;
+    $args->{ '-p' } = $1 if $args->{ '-p' } =~ /^(.+)\/$/;
 
 	crawl $args->{ '-p' }; #crawl all files
 
@@ -129,6 +131,8 @@ BEGIN {
         $tx->on( finish => sub {
 			my ( $tx, $code, $reason ) = @_;
 			INFO "Session with Briariues-server has been closed.";
+            my $finished_at = localtime( time );
+            INFO "$args->{ '-c' }: $started_at -> $finished_at";
 		});
 
 		$tx->on( message => sub {
