@@ -15,15 +15,18 @@ use constant {
 	CHUNCKS_USAGE     => 'chunks_usage/',
 	INCOMPLETE_ENDING => '.incomplete',
 
-	BACKUP_FREQUENCY_THRESHOLD => 60,
-};
+	BACKUP_FREQUENCY_THRESHOLD          => 60,
+	CHUNK_SIZE                          => 64000,
+	CHUNCKS_REGISTRY_BUCKET_NAME_LENGTH => 4,
+	FILES_REGISTRY_BUCKET_SIZE          => 1024,
+}; 
 
 my $started_at = DateTime->now;
 
 sub get_last_numeric_filename_into_dir {
 	my $dirname = shift;
 	opendir( my $dh, $dirname );
-	my @numeric_filenames = sort { $a <=> $b } grep { /^[0-9]+$/ and -f "$dirname/$_" } readdir($dh);
+	my @numeric_filenames = sort { $a <=> $b } grep { /^[0-9]+$/ and -f "$dirname/$_" } readdir( $dh );
     closedir $dh;
     return scalar @numeric_filenames ? pop @numeric_filenames : 0; 
 }
@@ -37,27 +40,45 @@ sub is_file_version_existed {
 	return -e FILES_REGISTRY . shift;
 }
 
+sub path_to_chunk {
+	my $chunk_hash = shift;
+	my @slices = grep { length $_ > 0 } split( /([0-9a-f]{2})/ , $chunk_hash, 16 );
+	pop @slices;
+	return CHUNCKS_REGISTRY . join( '/' =>  @slices ) . '/' . $chunk_hash;
+}
+
 sub add_chunk_to_version {
 	my ( $chunk_hash, $file_version ) = @_;
 	my $path_to_file = FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
 	make_path $path_to_file;
 	my $last_chunk_number = get_last_numeric_filename_into_dir( $path_to_file );
-	link CHUNCKS_REGISTRY . $chunk_hash, $path_to_file . '/' . ++$last_chunk_number;
+	link path_to_chunk( $chunk_hash ), $path_to_file . '/' . ++$last_chunk_number;
 }
 
 sub is_chunk_existed {
-	return -e CHUNCKS_REGISTRY . shift;
+	return -e path_to_chunk( shift );
 }
 
 sub create_chunk {
 	my ( $chunk_hash, $chunk_content ) = @_;
-	if ( -e CHUNCKS_REGISTRY . $chunk_hash ) {
-		return 0;
-	}
-    open( my $file, '>', CHUNCKS_REGISTRY . $chunk_hash ) or return 0;
+	my $path = path_to_chunk( $chunk_hash );
+	$path =~ /^(.+\/)[^\/]+$/;
+	make_path( $1 ) unless -e $1;
+    open( my $file, '>', $path ) or return 0;
     print $file $chunk_content;
     close $file;
 	return 1;
+}
+
+sub get_chunk {
+	my $path = path_to_chunk( shift );
+	return 0 unless -e $path;
+    open( my $file, '<', $path ) or return 0;
+    flock $file, 1;
+    my $data;
+    my $n = read( $file, $data, CHUNK_SIZE );
+    close $file;
+	return $data;	
 }
 
 sub is_available_for_backup {
@@ -83,7 +104,7 @@ sub on_message {
 	$msg = j $msg;
 	
 	if ( $msg->{ request } eq 'BACKUP_START' ) {
-		$self->app->log->info('Backup requested by ' . $msg->{ client });
+		$self->app->log->info( 'Backup requested by ' . $msg->{ client } );
 		$self->send( j { response => 'BACKUP_START_ACCEPTED' } );
 
 	}
