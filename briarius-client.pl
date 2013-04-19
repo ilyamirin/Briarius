@@ -58,8 +58,7 @@ sub slice_file {
     my $path_to_file_in_target = shift;
     my $path_to_file = $target_to_local->{ $path_to_file_in_target };
 
-    my $file;
-    open $file, '<', $path_to_file or die $!;
+    open( my $file, '<', $path_to_file ) or die $!;
 
     $chunks->{ $path_to_file_in_target } = [] and return if (stat( $file ))[ 7 ] == 0;
 
@@ -107,7 +106,7 @@ sub ws_create_file_version {
 BEGIN {
 	Log::Log4perl->easy_init(
 		{ 
-			level  => 'DEBUG',
+            level  => 'DEBUG',
             file   => "STDOUT",
             layout => '%m%n' 
         }, 

@@ -31,15 +31,6 @@ sub get_last_numeric_filename_into_dir {
     return scalar @numeric_filenames ? pop @numeric_filenames : 0; 
 }
 
-sub create_file_version_key {
-	my ( $user_name, $target_file_path, $time ) = @_;
-	return join '/' => $user_name, $target_file_path, $time;
-}
-
-sub is_file_version_existed {
-	return -e FILES_REGISTRY . shift;
-}
-
 sub path_to_chunk {
 	my $chunk_hash = shift;
 	my @slices = grep { length $_ > 0 } split( /([0-9a-f]{2})/ , $chunk_hash, 16 );
@@ -50,9 +41,18 @@ sub path_to_chunk {
 sub add_chunk_to_version {
 	my ( $chunk_hash, $file_version ) = @_;
 	my $path_to_file = FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
-	make_path $path_to_file;
-	my $last_chunk_number = get_last_numeric_filename_into_dir( $path_to_file );
-	link path_to_chunk( $chunk_hash ), $path_to_file . '/' . ++$last_chunk_number;
+	make_path $path_to_file unless -e $path_to_file;;
+	my $last_bucket = get_last_numeric_filename_into_dir( $path_to_file );	
+	unless ( $last_bucket ) {
+		$last_bucket++;
+		make_path( $path_to_file . '/' . $last_bucket );
+	}
+	my $last_chunk_number = get_last_numeric_filename_into_dir( $path_to_file . '/' . $last_bucket );
+	unless ( $last_chunk_number <= FILES_REGISTRY_BUCKET_SIZE) {
+		$last_bucket++;
+		make_path $path_to_file . '/' . $last_bucket;
+	}
+	link path_to_chunk( $chunk_hash ), $path_to_file . '/' . $last_bucket . '/' . ++$last_chunk_number;
 }
 
 sub is_chunk_existed {
@@ -79,6 +79,15 @@ sub get_chunk {
     my $n = read( $file, $data, CHUNK_SIZE );
     close $file;
 	return $data;	
+}
+
+sub create_file_version_key {
+	my ( $user_name, $target_file_path, $time ) = @_;
+	return join '/' => $user_name, $target_file_path, $time;
+}
+
+sub is_file_version_existed {
+	return -e FILES_REGISTRY . shift;
 }
 
 sub is_available_for_backup {
