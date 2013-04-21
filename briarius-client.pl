@@ -11,10 +11,10 @@ use Digest::MD5 qw(md5_hex);
 use constant { CHUNK_SIZE => 64000, };
 
 my $args;
-my @files           = ();
-my $target_to_local = {};
-my $chunks          = {};
-my $chunks_to_send  = {};
+my @files            = ();
+my $target_to_local  = {};
+my $chunks           = {};
+my $chunks_to_send   = {};
 my @files_to_restore = ();
 
 sub get_path_in_target {
@@ -114,17 +114,29 @@ sub ws_create_file_version {
 }
 
 sub ws_restore_next_file {
-    my $tx = shift;
+    my $tx           = shift;
     my $file_version = shift @files_to_restore;
     $tx->finish unless $file_version;
-    $tx->send( j { request => 'GET_CHUNK', file_version => $file_version, chunk_number => 1 } );    
+    $tx->send(
+        j {
+            request      => 'GET_CHUNK',
+            file_version => $file_version,
+            chunk_number => 1
+        }
+    );
 }
 
 sub ws_get_next_chunk {
     my ( $tx, $msg ) = @_;
-    my $file_version = $msg->{ file_version };
-    my $chunk_number = $msg->{ chunk_number };
-    $tx->send( j { request => 'GET_CHUNK', file_version => $file_version, chunk_number => ++$chunk_number } );    
+    my $file_version = $msg->{file_version};
+    my $chunk_number = $msg->{chunk_number};
+    $tx->send(
+        j {
+            request      => 'GET_CHUNK',
+            file_version => $file_version,
+            chunk_number => ++$chunk_number
+        }
+    );
 }
 
 BEGIN {
@@ -191,13 +203,14 @@ BEGIN {
                     elsif ( $msg->{response} eq 'CHUNK_IS_NOT_EXISTED' ) {
                         INFO "Chunk $msg->{ chunk_hash } is not existed.";
                         if ( $chunks_to_send->{ $msg->{chunk_hash} } ) {
-                            my $message = join '%%%' => 
-                                'client' => $args->{'-n'}, 
-                                'file' => $msg->{file}, 
-                                'file_version' => $msg->{file_version},
-                                'chunk_hash' => $msg->{chunk_hash},
-                                'chunk' => $chunks_to_send->{ $msg->{chunk_hash} };
-                            $tx->send( $message );
+                            my $message =
+                              join '%%%' => 'client' => $args->{'-n'},
+                              'file'     => $msg->{file},
+                              'file_version' => $msg->{file_version},
+                              'chunk_hash'   => $msg->{chunk_hash},
+                              'chunk' =>
+                              $chunks_to_send->{ $msg->{chunk_hash} };
+                            $tx->send($message);
                             $chunks_to_send->{ $msg->{chunk_hash} } = undef;
                         }
                     }
@@ -227,28 +240,31 @@ BEGIN {
                     }
                     elsif ( $msg->{response} eq 'RESTORE_START_ACCEPTED' ) {
                         INFO 'Restore accepted.';
-                        INFO Dumper @{ $msg->{ file_versions } };
-                        @files_to_restore = @{ $msg->{ file_versions } };
-                        ws_restore_next_file( $tx );
+                        INFO Dumper @{ $msg->{file_versions} };
+                        @files_to_restore = @{ $msg->{file_versions} };
+                        ws_restore_next_file($tx);
                     }
-                    elsif ( $msg->{response} eq 'CHUNK') {
+                    elsif ( $msg->{response} eq 'CHUNK' ) {
                         INFO "Chunks resieved $msg->{ chunk_number }.";
-                        INFO( "File version $msg->{ file_version } is completed.") and $tx->finish unless defined $msg->{ chunk };
-                        my $target = $args->{ '--target-id' };
-                        $msg->{ file_version } =~ /^$target(.+)\/([0-9]+)$/;
-                        my $path = $args->{ '-p' } . '/' . $2;
+                        INFO(
+                            "File version $msg->{ file_version } is completed.")
+                          and $tx->finish
+                          unless defined $msg->{chunk};
+                        my $target = $args->{'--target-id'};
+                        $msg->{file_version} =~ /^$target(.+)\/([0-9]+)$/;
+                        my $path = $args->{'-p'} . '/' . $2;
                         make_path $path;
                         $path .= $1;
-                        $tx->finish unless $msg->{ chunk };
-                        INFO $msg->{ file_version };
-                        open ( my $fh, ">>$path" ) or die $!;
-                        print $fh $msg->{ chunk };
+                        $tx->finish unless $msg->{chunk};
+                        INFO $msg->{file_version};
+                        open( my $fh, ">>$path" ) or die $!;
+                        print $fh $msg->{chunk};
                         close $fh;
                         ws_get_next_chunk( $tx, $msg );
                     }
-                    elsif ( $msg->{response} eq 'LAST_CHUNK') {
+                    elsif ( $msg->{response} eq 'LAST_CHUNK' ) {
                         INFO "Last chunk recieved.";
-                        ws_restore_next_file( $tx );
+                        ws_restore_next_file($tx);
                     }
                     else {
                         ERROR 'Unknown server response ' . Dumper $msg;
@@ -264,7 +280,13 @@ BEGIN {
             elsif ( $args->{'-c'} eq 'restore' ) {
                 $command = 'RESTORE_START';
             }
-            $tx->send( j { request => $command, client => $args->{'-n'}, target => $args->{ '--target-id' } } );
+            $tx->send(
+                j {
+                    request => $command,
+                    client  => $args->{'-n'},
+                    target  => $args->{'--target-id'}
+                }
+            );
         }
     );
 
