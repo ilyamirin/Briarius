@@ -10,7 +10,7 @@ use constant {
 	INCOMPLETE_ENDING => '.incomplete',
 	FILE_VERSION_MARKER => '/.cafs_fv',
     CHUNK_SIZE                          => 64000,
-	FILES_REGISTRY_BUCKET_SIZE          => 1024,
+	FILES_REGISTRY_BUCKET_SIZE          => 16000,
 };
 
 sub last_number_in_dir {

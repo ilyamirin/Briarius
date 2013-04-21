@@ -5,6 +5,7 @@ use DateTime;
 use Data::Dumper;
 use File::Path qw(make_path remove_tree);
 use File::stat;
+use JSON::XS;
 use Mojo::JSON 'j';
 use Time::HiRes;
 use Redis;
@@ -34,7 +35,7 @@ sub last_number_in_dir {
 	opendir( my $dh, $dirname );
 	my $res = 0;
 	while ( readdir $dh ) {
-		next if /^\./;
+		next unless /^[0-9]+$/;
 		$res = $_ if $res < $_;
 	}
     closedir $dh;
@@ -138,8 +139,24 @@ sub explore_tree {
 sub on_message {
 	my ( $self, $msg ) = @_;
 	
+	if (length($msg) >= 500) {
+		my $user = 'Ivan';
+        my $msg = { grep { defined } split( '%%%' => $msg) };
+		my $response = {};
+		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
+		unless ( $redis->rpush( 'add_chunk_to_file_version', j $msg )) {
+			$self->app->log->error( "Cant load chunk $msg->{ chunk_hash } to $msg->{ file_version }" ); 
+			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
+		}
+		else {
+			$response->{ response } = 'CHUNK_WAS_LOADED';			
+		}
+		$self->send( j $response );
+        return;
+	}
+
 	$msg = j $msg;
-	
+
 	if ( $msg->{ request } eq 'BACKUP_START' ) {
 		$self->app->log->info( 'Backup requested by ' . $msg->{ client } );
 		$self->send( j { response => 'BACKUP_START_ACCEPTED' } );
@@ -168,19 +185,6 @@ sub on_message {
 			$res->{ response } = 'CHUNK_IS_NOT_EXISTED';
 		}
 		$self->send( j $res );
-	}
-	elsif ( $msg->{ request } eq 'LOAD_CHUNK' ) {
-		my $user = 'Ivan';
-		my $response = {};
-		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		unless ( $redis->rpush( 'add_chunk_to_file_version', j $msg )) {
-			$self->app->log->error( "Cant load chunk $msg->{ chunk_hash } to $msg->{ file_version }" ); 
-			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
-		}
-		else {
-			$response->{ response } = 'CHUNK_WAS_LOADED';			
-		}
-		$self->send( j $response );
 	}
 	elsif ( $msg->{ request } eq 'ADD_EXISTED_CHUNK_TO_FILE_VERSION' ) {		
 		my $user = 'Ivan';

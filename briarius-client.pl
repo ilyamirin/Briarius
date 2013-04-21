@@ -191,15 +191,13 @@ BEGIN {
                     elsif ( $msg->{response} eq 'CHUNK_IS_NOT_EXISTED' ) {
                         INFO "Chunk $msg->{ chunk_hash } is not existed.";
                         if ( $chunks_to_send->{ $msg->{chunk_hash} } ) {
-                            my $req = {
-                                request      => 'LOAD_CHUNK',
-                                client       => $args->{'-n'},
-                                file         => $msg->{file},
-                                file_version => $msg->{file_version},
-                                chunk_hash   => $msg->{chunk_hash},
-                                chunk => $chunks_to_send->{ $msg->{chunk_hash} }
-                            };
-                            $tx->send( j $req );
+                            my $message = join '%%%' => 
+                                'client' => $args->{'-n'}, 
+                                'file' => $msg->{file}, 
+                                'file_version' => $msg->{file_version},
+                                'chunk_hash' => $msg->{chunk_hash},
+                                'chunk' => $chunks_to_send->{ $msg->{chunk_hash} };
+                            $tx->send( $message );
                             $chunks_to_send->{ $msg->{chunk_hash} } = undef;
                         }
                     }
