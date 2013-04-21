@@ -7,6 +7,7 @@ use File::Path qw(make_path remove_tree);
 use File::stat;
 use Mojo::JSON 'j';
 use Time::HiRes;
+use Redis;
 
 plugin 'PODRenderer';
 
@@ -21,7 +22,10 @@ use constant {
 	CHUNK_SIZE                          => 64000,
 	CHUNCKS_REGISTRY_BUCKET_NAME_LENGTH => 4,
 	FILES_REGISTRY_BUCKET_SIZE          => 1024,
-}; 
+};
+
+my $redis = Redis->new;
+#$redis->ping || die "Can not connect to Redis!";
 
 my $started_at = DateTime->now;
 
@@ -211,16 +215,12 @@ sub on_message {
 		my $user = 'Ivan';
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		unless ( create_chunk $msg->{ chunk_hash }, $msg->{ chunk } ) {
-			$self->app->log->error( "Cant load chunk $msg->{ chunk_hash }" ); 
+		unless ( $redis->publish( 'add_chunk_to_file_version', j $msg )) {
+			$self->app->log->error( "Cant load chunk $msg->{ chunk_hash } to $msg->{ file_version }" ); 
 			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
 		}
 		else {
 			$response->{ response } = 'CHUNK_WAS_LOADED';			
-			unless ( add_chunk_to_version $msg->{ chunk_hash }, $msg->{ file_version } ) {
-				$self->app->log->error( "Cant add chunk to file" ); 
-				$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
-			}
 		}
 		$self->send( j $response );
 	}
@@ -228,7 +228,7 @@ sub on_message {
 		my $user = 'Ivan';
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;		
-		unless ( add_chunk_to_version $msg->{ chunk_hash }, $msg->{ file_version } ) {
+		unless ( $redis->publish( 'add_chunk_to_file_version', j $msg ) ) {
 			$self->app->log->error( "Cant add chunk to file" ); 
 			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
 		} 
@@ -240,12 +240,10 @@ sub on_message {
 	elsif ( $msg->{ request } eq 'CREATE_FILE_VERSION' ) {
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		my ( $status, $message ) = complete_file_version $msg->{ file_version };		
-		if ( $status ) {
+		if ( $redis->publish( 'complete_file_version', j $msg ) ) {
 			$response->{ response } = 'FILE_VERSION_WAS_CREATED';
 		}
 		else {
-			$self->app->log->error( $message );
 			$response->{ response } = 'FILE_VERSION_WAS_NOT_CREATED';
 		}
 		$self->send( j $response );
