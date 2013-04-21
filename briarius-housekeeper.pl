@@ -79,23 +79,10 @@ sub complete_file_version {
 	return rename $path_to_incomplete_version, $path_to_version;
 }
 
-BEGIN {
-    Log::Log4perl->easy_init(
-        {
-            level  => 'DEBUG',
-            file   => "STDOUT",
-            layout => '%m%n'
-        },
-    );
+sub main {
+    my $redis = shift;
 
-	my $redis = Redis->new;
-	#$redis->ping || die "Can not connect to Redis!";
-
-	INFO 'Housekeeper just has been started.';
-
-	$redis->subscribe( 'add_chunk_to_file_version', sub {
-        my ($message, $topic, $subscribed_topic) = @_;
-		my $msg = j $message;
+	while (my $msg = j $redis->lpop('add_chunk_to_file_version')) {
         INFO "Chunk $msg->{ chunk_hash } recieved.";
 		if ( create_chunk( $msg->{ chunk_hash }, $msg->{ chunk } ) ) {
             INFO "Chunk $msg->{ chunk_hash } was created.";
@@ -109,11 +96,9 @@ BEGIN {
 		else {
 			ERROR "Chunk $msg->{ chunk_hash } was NOT created.";
 		}
-    });
+    }
 
-	$redis->subscribe( 'complete_file_version', sub {
-        my ($message, $topic, $subscribed_topic) = @_;
-		my $msg = j $message;
+	while (my $msg = j $redis->lpop( 'complete_file_version') ) {
         INFO "Complete file version $msg->{ file_version } recieved.";
 		if ( complete_file_version( $msg->{ file_version } ) ) {
             INFO "File version $msg->{ file_version } was completed.";
@@ -121,11 +106,28 @@ BEGIN {
 		else {
 			ERROR "File version $msg->{ file_version } was NOT completed.";
 		}
-    });
+    }
 
-    INFO 'Housekeeper is subscribed for chunk creations.';
+    sleep 1;
+}#main
 
-	$redis->wait_for_messages( 1 ) while 1;
-}#BEGIN
+BEGIN {
+    Log::Log4perl->easy_init(
+        {
+            level  => 'DEBUG',
+            file   => "STDOUT",
+            layout => '%m%n'
+        },
+    );
+	
+    my $redis = Redis->new;
+	$redis->ping || die "Can not connect to Redis!";
+
+	INFO 'Housekeeper just has been started.';
+
+    main( $redis ) while 1;
+    
+    INFO 'Housekeeper has his deal done and now he has to leave.';
+}
 
 

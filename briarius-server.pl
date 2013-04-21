@@ -48,41 +48,8 @@ sub path_to_chunk {
 	return CHUNCKS_REGISTRY . join( '/' =>  @slices ) . '/' . $chunk_hash;
 }
 
-sub add_chunk_to_version {
-	my ( $chunk_hash, $file_version ) = @_;
-	my $path_to_file = FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
-	unless( -e $path_to_file ) {
-		make_path $path_to_file;
-		open( my $fh, '>', $path_to_file . FILE_VERSION_MARKER); 
-		print $fh ' ';
-		close $fh;
-	}
-	my $last_bucket = last_number_in_dir( $path_to_file );	
-	unless ( $last_bucket ) {
-		$last_bucket = 1;
-		make_path( $path_to_file . '/' . $last_bucket );
-	}
-	my $last_chunk_number = last_number_in_dir( $path_to_file . '/' . $last_bucket ) + 1;
-	if ( $last_chunk_number > FILES_REGISTRY_BUCKET_SIZE * $last_bucket ) {
-		$last_bucket++;
-		make_path $path_to_file . '/' . $last_bucket;
-	}
-	link path_to_chunk( $chunk_hash ), $path_to_file . '/' . $last_bucket . '/' . $last_chunk_number;
-}
-
 sub is_chunk_existed {
 	return -e path_to_chunk( shift );
-}
-
-sub create_chunk {
-	my ( $chunk_hash, $chunk_content ) = @_;
-	my $path = path_to_chunk( $chunk_hash );
-	$path =~ /^(.+\/)[^\/]+$/;
-	make_path( $1 ) unless -e $1;
-    open( my $file, '>', $path ) or return 0;
-    print $file $chunk_content;
-    close $file;
-	return 1;
 }
 
 sub create_file_version_key {
@@ -100,15 +67,6 @@ sub is_available_for_backup {
 	return 1 unless -e $1;
 	my $last_backup_date = last_number_in_dir( $1 );
     return $last_backup_date + BACKUP_FREQUENCY_THRESHOLD <= time ? 1 : 0;
-}
-
-sub complete_file_version {
-	my ( $file_version ) = @_;
-	return ( 0, "File version $file_version is already existed" ) if is_file_version_existed $file_version;
-	my $path_to_version = FILES_REGISTRY . $file_version;
-	my $path_to_incomplete_version = $path_to_version . INCOMPLETE_ENDING;
-	return ( 0, "Has no incomplete $file_version" ) unless -e $path_to_incomplete_version;
-	return rename $path_to_incomplete_version, $path_to_version;
 }
 
 sub is_file_version_container {
@@ -215,7 +173,7 @@ sub on_message {
 		my $user = 'Ivan';
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		unless ( $redis->publish( 'add_chunk_to_file_version', j $msg )) {
+		unless ( $redis->rpush( 'add_chunk_to_file_version', j $msg )) {
 			$self->app->log->error( "Cant load chunk $msg->{ chunk_hash } to $msg->{ file_version }" ); 
 			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
 		}
@@ -228,7 +186,7 @@ sub on_message {
 		my $user = 'Ivan';
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;		
-		unless ( $redis->publish( 'add_chunk_to_file_version', j $msg ) ) {
+		unless ( $redis->rpush( 'add_chunk_to_file_version', j $msg ) ) {
 			$self->app->log->error( "Cant add chunk to file" ); 
 			$response->{ response } = 'CHUNK_WAS_NOT_LOADED';
 		} 
@@ -240,7 +198,7 @@ sub on_message {
 	elsif ( $msg->{ request } eq 'CREATE_FILE_VERSION' ) {
 		my $response = {};
 		$response->{ $_ } = $msg->{ $_ } for qw/chunk_hash file file_version/;
-		if ( $redis->publish( 'complete_file_version', j $msg ) ) {
+		if ( $redis->rpush( 'complete_file_version', j $msg ) ) {
 			$response->{ response } = 'FILE_VERSION_WAS_CREATED';
 		}
 		else {
@@ -264,10 +222,15 @@ sub on_message {
 		my $user = 'Ivan';
 		my $chunk = get_chunk( $user . '/' . $msg->{ file_version }, $msg->{ chunk_number } );
 		my $res = {};
-		$res->{ response } = 'CHUNK';
-		$res->{ file_version } = $msg->{ file_version };
-		$res->{ chunk_number } = $msg->{ chunk_number };
-		$res->{ chunk } = $chunk;
+        if ($chunk) {
+		    $res->{ response } = 'CHUNK';
+		    $res->{ file_version } = $msg->{ file_version };
+		    $res->{ chunk_number } = $msg->{ chunk_number };
+		    $res->{ chunk } = $chunk;
+        }
+        else {
+            $res->{ response } = 'LAST_CHUNK';
+        }
 		$self->send( j $res );
 	}
 

@@ -229,10 +229,9 @@ BEGIN {
                     }
                     elsif ( $msg->{response} eq 'RESTORE_START_ACCEPTED' ) {
                         INFO 'Restore accepted.';
-                        INFO Dumper $msg;
+                        INFO Dumper @{ $msg->{ file_versions } };
                         @files_to_restore = @{ $msg->{ file_versions } };
                         ws_restore_next_file( $tx );
-
                     }
                     elsif ( $msg->{response} eq 'CHUNK') {
                         INFO "Chunks resieved $msg->{ chunk_number }.";
@@ -243,11 +242,15 @@ BEGIN {
                         make_path $path;
                         $path .= $1;
                         $tx->finish unless $msg->{ chunk };
-                        INFO $path;
+                        INFO $msg->{ file_version };
                         open ( my $fh, ">>$path" ) or die $!;
                         print $fh $msg->{ chunk };
                         close $fh;
                         ws_get_next_chunk( $tx, $msg );
+                    }
+                    elsif ( $msg->{response} eq 'LAST_CHUNK') {
+                        INFO "Last chunk recieved.";
+                        ws_restore_next_file( $tx );
                     }
                     else {
                         ERROR 'Unknown server response ' . Dumper $msg;
