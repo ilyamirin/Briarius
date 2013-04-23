@@ -1,4 +1,5 @@
 use Data::Dumper;
+use Digest::MurmurHash qw/murmur_hash/;
 use File::Path qw(make_path remove_tree);
 use Log::Log4perl qw(:easy);
 use Mojo::JSON 'j';
@@ -10,13 +11,17 @@ use constant {
     INCOMPLETE_ENDING          => '.incomplete',
     FILE_VERSION_MARKER        => '/.cafs_fv',
     CHUNK_SIZE                 => 64000,
-    FILES_REGISTRY_BUCKET_SIZE => 16000,
+    FILES_REGISTRY_BUCKET_SIZE => 1024,
 };
+
+my $redis = Redis->new;
+$redis->ping || die "Can not connect to Redis!";
 
 sub last_number_in_dir {
     my $dirname = shift;
+    INFO "LND: $dirname";
     opendir( my $dh, $dirname );
-    my $res = 0;
+    $res = 0;
     while ( readdir $dh ) {
         next if /^\./;
         $res = $_ if $res < $_;
@@ -36,35 +41,46 @@ sub path_to_chunk {
 sub create_chunk {
     my ( $chunk_hash, $chunk_content ) = @_;
     my $path = path_to_chunk($chunk_hash);
-    return 1 if -e $path;
+    #return 1 if -e $path;
     $path =~ /^(.+\/)[^\/]+$/;
-    make_path($1) unless -e $1;
+    make_path($1);# unless -e $1;
     open( my $file, '>', $path ) or return 0;
     print $file $chunk_content;
     close $file;
+    my $bloom_filter = $redis->get('bloom_filter') or 0;
+    $bloom_filter |= murmur_hash($chunk_hash); 
+    $redis->set('bloom_filter', $bloom_filter);
     return 1;
 }
 
 sub add_chunk_to_version {
     my ( $chunk_hash, $file_version ) = @_;
     my $path_to_file = FILES_REGISTRY . $file_version . INCOMPLETE_ENDING;
-    unless ( -e $path_to_file ) {
+    #unless ( -e $path_to_file ) {
         make_path $path_to_file;
         open( my $fh, '>', $path_to_file . FILE_VERSION_MARKER );
         print $fh ' ';
         close $fh;
-    }
-    my $last_bucket = last_number_in_dir($path_to_file);
+        #}
+    my $last_bucket = $redis->get("last_number_in_$path_to_file") or last_number_in_dir($path_to_file);
     unless ($last_bucket) {
         $last_bucket = 1;
         make_path( $path_to_file . '/' . $last_bucket );
+        $redis->set("last_number_in_$path_to_file", 1);
     }
-    my $last_chunk_number =
-      last_number_in_dir( $path_to_file . '/' . $last_bucket ) + 1;
+    my $dirname = $path_to_file . '/' . $last_bucket;
+    my $last_chunk_number = $redis->get("last_number_in_$dirname");
+    unless ($last_chunk_number > 0) {
+        $redis->set("last_number_in_$dirname", 0);
+        $last_chunk_number = last_number_in_dir($dirname);
+    }
+    $last_chunk_number++;
     if ( $last_chunk_number > FILES_REGISTRY_BUCKET_SIZE * $last_bucket ) {
         $last_bucket++;
+        $redis->incr("last_number_in_$path_to_file");
         make_path $path_to_file . '/' . $last_bucket;
     }
+    $redis->incr("last_number_in_$dirname");
     link path_to_chunk($chunk_hash),
       $path_to_file . '/' . $last_bucket . '/' . $last_chunk_number;
 }
@@ -83,24 +99,17 @@ sub complete_file_version {
 }
 
 sub main {
-    my $redis = shift;
-
     while ( my $msg = j $redis->lpop('add_chunk_to_file_version') ) {
         INFO "Chunk $msg->{ chunk_hash } recieved.";
-        if ( create_chunk( $msg->{chunk_hash}, $msg->{chunk} ) ) {
+        my $is_chunk_created = create_chunk($msg->{chunk_hash}, $msg->{chunk}); 
+        if ( $is_chunk_created ) {
             INFO "Chunk $msg->{ chunk_hash } was created.";
-            if (
-                add_chunk_to_version(
-                    $msg->{chunk_hash}, $msg->{file_version}
-                )
-              )
-            {
-                INFO
-"Chunk $msg->{ chunk_hash } was added to $msg->{ file_version }.";
+            my $is_chunk_added = add_chunk_to_version($msg->{chunk_hash}, $msg->{file_version});
+            if ($is_chunk_added) {
+                INFO "Chunk $msg->{ chunk_hash } was added to $msg->{ file_version }.";
             }
             else {
-                ERROR
-"Chunk $msg->{ chunk_hash } was NOT added to $msg->{ file_version }.";
+                ERROR "Chunk $msg->{ chunk_hash } was NOT added to $msg->{ file_version }.";
             }
         }
         else {
@@ -117,26 +126,19 @@ sub main {
             ERROR "File version $msg->{ file_version } was NOT completed.";
         }
     }
-
-    sleep 1;
 }    #main
 
-BEGIN {
-    Log::Log4perl->easy_init(
-        {
-            level  => 'DEBUG',
-            file   => "STDOUT",
-            layout => '%m%n'
-        },
-    );
+Log::Log4perl->easy_init(
+    {
+        level  => 'DEBUG',
+        file   => "STDOUT",
+        layout => '%m%n'
+    },
+);
 
-    my $redis = Redis->new;
-    $redis->ping || die "Can not connect to Redis!";
+INFO 'Housekeeper just has been started.';
 
-    INFO 'Housekeeper just has been started.';
+main() while 1;
 
-    main($redis) while 1;
-
-    INFO 'Housekeeper has his deal done and now he has to leave.';
-}
+INFO 'Housekeeper has his deal done and now he has to leave.';
 

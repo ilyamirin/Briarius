@@ -3,6 +3,7 @@ use Mojolicious::Lite;
 
 use DateTime;
 use Data::Dumper;
+use Digest::MurmurHash qw/murmur_hash/;
 use File::Path qw(make_path remove_tree);
 use File::stat;
 use JSON::XS;
@@ -26,8 +27,7 @@ use constant {
 };
 
 my $redis = Redis->new;
-
-#$redis->ping || die "Can not connect to Redis!";
+$redis->ping || die "Can not connect to Redis!";
 
 my $started_at = DateTime->now;
 
@@ -52,7 +52,10 @@ sub path_to_chunk {
 }
 
 sub is_chunk_existed {
-    return -e path_to_chunk(shift);
+    my $chunk_hash = shift;
+    my $bloom_filter = $redis->get('bloom_filter');
+    return 0 if ($bloom_filter | murmur_hash($chunk_hash)) > $bloom_filter; 
+    return -e path_to_chunk($chunk_hash);
 }
 
 sub create_file_version_key {
@@ -85,11 +88,9 @@ sub is_file_version_container {
 sub get_chunk {
     my ( $file_version, $chunk_number ) = @_;
     return 0 unless is_file_version_existed($file_version);
-    my $bucket = int( $chunk_number / FILES_REGISTRY_BUCKET_SIZE );
-    $bucket++ if $chunk_number != FILES_REGISTRY_BUCKET_SIZE;
+    my $bucket = int( $chunk_number / (FILES_REGISTRY_BUCKET_SIZE + 1) ) + 1;
     my $path_to_chunk =
       FILES_REGISTRY . $file_version . '/' . $bucket . '/' . $chunk_number;
-    say $path_to_chunk;
     return undef unless -e $path_to_chunk;
     open( my $fh, '<', $path_to_chunk ) or return 0;
     my $data;
@@ -147,7 +148,7 @@ sub on_message {
 
     if ( length($msg) >= 500 ) {
         my $user     = 'Ivan';
-        my $msg      = { grep { defined } split( '%%%' => $msg ) };
+        my $msg      = { grep { defined } split( '%%%%%%' => $msg ) };
         my $response = {};
         $response->{$_} = $msg->{$_} for qw/chunk_hash file file_version/;
         unless ( $redis->rpush( 'add_chunk_to_file_version', j $msg ) ) {

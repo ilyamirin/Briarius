@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
 
+use BSON qw/encode decode/;
 use Modern::Perl;
 use Data::Dumper;
 use File::Path qw(make_path remove_tree);
@@ -197,21 +198,21 @@ BEGIN {
                     }
                     elsif ( $msg->{response} eq 'FILE_VERSION_IS_EXISTED' ) {
                         INFO "File version $msg->{ file_version } is existed";
-                        $chunks->{ $msg->{file} } = undef;
+                        delete $chunks->{ $msg->{file} };
                         $tx->finish unless ws_is_next_file_exist($tx);
                     }
                     elsif ( $msg->{response} eq 'CHUNK_IS_NOT_EXISTED' ) {
                         INFO "Chunk $msg->{ chunk_hash } is not existed.";
                         if ( $chunks_to_send->{ $msg->{chunk_hash} } ) {
                             my $message =
-                              join '%%%' => 'client' => $args->{'-n'},
+                              join '%%%%%%' => 'client' => $args->{'-n'},
                               'file'     => $msg->{file},
                               'file_version' => $msg->{file_version},
                               'chunk_hash'   => $msg->{chunk_hash},
                               'chunk' =>
                               $chunks_to_send->{ $msg->{chunk_hash} };
                             $tx->send($message);
-                            $chunks_to_send->{ $msg->{chunk_hash} } = undef;
+                            delete $chunks_to_send->{ $msg->{chunk_hash} };
                         }
                     }
                     elsif ( $msg->{response} eq 'CHUNK_IS_EXISTED' ) {
@@ -224,7 +225,7 @@ BEGIN {
                             chunk_hash   => $msg->{chunk_hash}
                         };
                         $tx->send( j $req );
-                        $chunks_to_send->{ $msg->{chunk_hash} } = undef;
+                        delete $chunks_to_send->{ $msg->{chunk_hash} };
                     }
                     elsif ( $msg->{response} eq 'CHUNK_WAS_LOADED' ) {
                         INFO "Chunk $msg->{ chunk_hash } was loaded.";
@@ -240,7 +241,6 @@ BEGIN {
                     }
                     elsif ( $msg->{response} eq 'RESTORE_START_ACCEPTED' ) {
                         INFO 'Restore accepted.';
-                        INFO Dumper @{ $msg->{file_versions} };
                         @files_to_restore = @{ $msg->{file_versions} };
                         ws_restore_next_file($tx);
                     }
@@ -253,9 +253,8 @@ BEGIN {
                         my $target = $args->{'--target-id'};
                         $msg->{file_version} =~ /^$target(.+)\/([0-9]+)$/;
                         my $path = $args->{'-p'} . '/' . $2;
-                        make_path $path;
+                        make_path $path unless -e $path;
                         $path .= $1;
-                        $tx->finish unless $msg->{chunk};
                         INFO $msg->{file_version};
                         open( my $fh, ">>$path" ) or die $!;
                         print $fh $msg->{chunk};
