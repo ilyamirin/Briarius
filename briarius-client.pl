@@ -6,7 +6,6 @@ use Data::Dumper;
 use File::Path qw(make_path remove_tree);
 use Log::Log4perl qw(:easy);
 use Mojo::UserAgent;
-use Mojo::JSON 'j';
 use Digest::MD5 qw(md5_hex);
 
 use constant { CHUNK_SIZE => 64000, };
@@ -17,6 +16,16 @@ my $target_to_local  = {};
 my $chunks           = {};
 my $chunks_to_send   = {};
 my @files_to_restore = ();
+
+sub j {
+    my $param = shift;
+    if (ref($param) eq "HASH") {
+        return join '%%#!@#!@#!@#' => ( %$param );
+    }
+    else {
+        return { split '%%#!@#!@#!@#' => $param };
+    }
+}
 
 sub get_path_in_target {
     my ( $absolute_path, $outer_path ) = @_;
@@ -204,14 +213,15 @@ BEGIN {
                     elsif ( $msg->{response} eq 'CHUNK_IS_NOT_EXISTED' ) {
                         INFO "Chunk $msg->{ chunk_hash } is not existed.";
                         if ( $chunks_to_send->{ $msg->{chunk_hash} } ) {
-                            my $message =
-                              join '%%%%%%' => 'client' => $args->{'-n'},
-                              'file'     => $msg->{file},
-                              'file_version' => $msg->{file_version},
-                              'chunk_hash'   => $msg->{chunk_hash},
-                              'chunk' =>
-                              $chunks_to_send->{ $msg->{chunk_hash} };
-                            $tx->send($message);
+                            my $message = {
+                                'request'=> 'LOAD_CHUNK',
+                                'client' => $args->{'-n'},
+                                'file'     => $msg->{file},
+                                'file_version' => $msg->{file_version},
+                                'chunk_hash'   => $msg->{chunk_hash},
+                                'chunk' => $chunks_to_send->{ $msg->{chunk_hash} }
+                            };
+                            $tx->send(j $message);
                             delete $chunks_to_send->{ $msg->{chunk_hash} };
                         }
                     }
@@ -241,7 +251,7 @@ BEGIN {
                     }
                     elsif ( $msg->{response} eq 'RESTORE_START_ACCEPTED' ) {
                         INFO 'Restore accepted.';
-                        @files_to_restore = @{ $msg->{file_versions} };
+                        push @files_to_restore, $msg->{file_version};
                         ws_restore_next_file($tx);
                     }
                     elsif ( $msg->{response} eq 'CHUNK' ) {

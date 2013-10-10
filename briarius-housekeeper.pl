@@ -2,7 +2,6 @@ use Data::Dumper;
 use Digest::MurmurHash qw/murmur_hash/;
 use File::Path qw(make_path remove_tree);
 use Log::Log4perl qw(:easy);
-use Mojo::JSON 'j';
 use Redis;
 
 use constant {
@@ -17,9 +16,20 @@ use constant {
 my $redis = Redis->new;
 $redis->ping || die "Can not connect to Redis!";
 
+sub j {
+    my $param = shift;
+    return 0 unless $param;
+    if (ref($param) eq "HASH") {
+        return join '%%#!@#!@#!@#' => ( %$param );
+    }
+    else {
+        return { split '%%#!@#!@#!@#' => $param };
+    }
+}
+
+
 sub last_number_in_dir {
     my $dirname = shift;
-    INFO "LND: $dirname";
     opendir( my $dh, $dirname );
     $res = 0;
     while ( readdir $dh ) {
@@ -100,7 +110,6 @@ sub complete_file_version {
 
 sub main {
     while ( my $msg = j $redis->lpop('add_chunk_to_file_version') ) {
-        INFO "Chunk $msg->{ chunk_hash } recieved.";
         my $is_chunk_created = create_chunk($msg->{chunk_hash}, $msg->{chunk}); 
         if ( $is_chunk_created ) {
             INFO "Chunk $msg->{ chunk_hash } was created.";
@@ -132,7 +141,7 @@ Log::Log4perl->easy_init(
     {
         level  => 'DEBUG',
         file   => "STDOUT",
-        layout => '%m%n'
+        layout => '%d %-5p %c - %m%n'
     },
 );
 
