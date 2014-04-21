@@ -116,15 +116,19 @@ sub ws_create_file_version {
 
 sub ws_restore_next_file {
     my $tx           = shift;
-    my $file_version = shift @files_to_restore;
-    $tx->finish unless $file_version;
-    $tx->send(
-        j {
-            request      => 'GET_CHUNK',
-            file_version => $file_version,
-            chunk_number => 1
-        }
-    );
+    my $file_version = shift @files_to_restore;     
+    if ($file_version) {
+        $tx->send(
+            j {
+                request      => 'GET_CHUNK',
+                file_version => $file_version,
+                chunk_number => 1
+            }
+        );
+    }
+    else {
+        $tx->finish;
+    }
 }
 
 sub ws_get_next_chunk {
@@ -204,13 +208,13 @@ BEGIN {
                     elsif ( $msg->{response} eq 'CHUNK_IS_NOT_EXISTED' ) {
                         INFO "Chunk $msg->{ chunk_hash } is not existed.";
                         if ( $chunks_to_send->{ $msg->{chunk_hash} } ) {
-                            my $message =
-                              join '%%%%%%' => 'client' => $args->{'-n'},
-                              'file'     => $msg->{file},
-                              'file_version' => $msg->{file_version},
-                              'chunk_hash'   => $msg->{chunk_hash},
-                              'chunk' =>
-                              $chunks_to_send->{ $msg->{chunk_hash} };
+                            my $message = join '%%%%%%' => 
+                                'request' => 'LOAD_CHUNK',                            
+                                  'client' => $args->{'-n'},
+                                  'file'     => $msg->{file},
+                                  'file_version' => $msg->{file_version},
+                                  'chunk_hash'   => $msg->{chunk_hash},
+                                  'chunk' => $chunks_to_send->{ $msg->{chunk_hash} };
                             $tx->send($message);
                             delete $chunks_to_send->{ $msg->{chunk_hash} };
                         }

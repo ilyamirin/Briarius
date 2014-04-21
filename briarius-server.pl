@@ -146,7 +146,7 @@ sub explore_tree {
 sub on_message {
     my ( $self, $msg ) = @_;
 
-    if ( length($msg) >= 500 ) {
+    if ( $msg =~ /\%\%\%\%\%\%/ ) {
         my $user     = 'Ivan';
         my $msg      = { grep { defined } split( '%%%%%%' => $msg ) };
         my $response = {};
@@ -260,9 +260,9 @@ sub on_message {
     }
     elsif ( $msg->{request} eq 'GET_CHUNK' ) {
         $self->app->log->info('Chunk requested ');
+        $self->app->log->info(Dumper $msg);
         my $user = 'Ivan';
-        my $chunk =
-          get_chunk( $user . '/' . $msg->{file_version}, $msg->{chunk_number} );
+        my $chunk = get_chunk( $user . '/' . $msg->{file_version}, $msg->{chunk_number} );
         my $res = {};
         if ($chunk) {
             $res->{response}     = 'CHUNK';
@@ -272,7 +272,8 @@ sub on_message {
         }
         else {
             $res->{response} = 'LAST_CHUNK';
-        }
+            $self->app->log->info(Dumper j $res);
+        }        
         $self->send( j $res );
     }
 
